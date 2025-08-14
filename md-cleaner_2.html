@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Markdown 清洗小工具</title>
+<style>
+  :root { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Noto Sans, "PingFang TC", "Heiti TC", sans-serif; }
+  body { margin: 1rem; max-width: 900px; }
+  h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+  .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; margin-bottom: .5rem; }
+  textarea { width: 100%; height: 32vh; padding: .75rem; border: 1px solid #ccc; border-radius: .5rem; }
+  .out { height: 40vh; }
+  button { padding: .6rem .9rem; border: 1px solid #999; background: #f7f7f7; border-radius: .5rem; }
+  button:active { transform: scale(.98); }
+  label { white-space: nowrap; }
+  input[type="text"] { padding: .4rem .6rem; border: 1px solid #ccc; border-radius: .4rem; }
+  .hint { color: #666; font-size: .9rem; }
+</style>
+</head>
+<body>
+  <h1>Markdown 清洗小工具</h1>
+
+  <div class="row">
+    <button id="pasteBtn">貼上剪貼簿</button>
+    <button id="exampleBtn">載入範例</button>
+    <span class="hint">（若無法讀取剪貼簿，請手動貼在下方）</span>
+  </div>
+
+  <textarea id="input" placeholder="把原始文字貼在這裡"></textarea>
+
+  <fieldset style="border:1px solid #ddd;border-radius:.5rem;padding:.5rem;margin:.75rem 0;">
+    <legend>清洗選項</legend>
+    <div class="row">
+      <label><input type="checkbox" id="trimLines" checked> 去掉每行前後空白</label>
+      <label><input type="checkbox" id="rstrip" checked> 去掉每行尾端多餘空白</label>
+      <label><input type="checkbox" id="collapseSpaces"> 合併多個空格為 1（跳過 ```程式碼區塊```）</label>
+      <label><input type="checkbox" id="collapseBlank" checked> 連續空白行縮成 1 行</label>
+      <label><input type="checkbox" id="normalizeQuotes"> 正規化引號（“ ” ‘ ’ → " '）</label>
+      <label><input type="checkbox" id="fixList" checked> 清理清單（項目前後多餘空白）</label>
+    </div>
+  </fieldset>
+
+  <div class="row">
+    <button id="cleanBtn">清洗 → 下方輸出</button>
+    <button id="copyBtn">複製輸出</button>
+    <input id="filename" type="text" placeholder="檔名，例如 notes.md" style="flex:1;min-width:180px;">
+    <button id="saveBtn">下載 .md</button>
+  </div>
+
+  <textarea id="output" class="out" placeholder="清洗後的內容會在這裡"></textarea>
+
+  <p class="hint">iPhone 的 Safari 下載後會到「檔案 → 下載項目」。若下載鈕沒反應，請長按「下載 .md」試試。</p>
+
+<script>
+function cleanText(raw, opts) {
+  let text = raw.replace(/\r\n?/g, "\n");
+  const lines = text.split("\n");
+  let inFence = false;
+  const out = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    const fenceStartOrEnd = line.trim().startsWith("```");
+
+    if (fenceStartOrEnd) {
+      if (opts.rstrip) line = line.replace(/\s+$/, "");
+      out.push(line);
+      inFence = !inFence;
+      continue;
+    }
+
+    if (!inFence) {
+      if (opts.rstrip) line = line.replace(/\s+$/, "");
+
+      if (opts.trimLines) {
+        // 去掉前後空白，但保留 2 個以上的行首縮排
+        line = line.replace(/^(?:( {2,})| +)?(.*)$/, (match, indent, rest) => {
+          if (indent) return indent + rest.trimEnd();
+          return rest.trim();
+        });
+      }
+
+      if (opts.collapseSpaces && !line.includes("|")) {
+        line = line.replace(/ {2,}/g, " ");
+      }
+
+      if (opts.fixList) {
+        line = line.replace(/^(\s*[-*+]\s+)\s+/, "$1");
+        line = line.replace(/^(\s*\d+\.\s+)\s+/, "$1");
+      }
+
+      if (opts.normalizeQuotes) {
+        line = line.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+      }
+    } else {
+      if (opts.rstrip) line = line.replace(/\s+$/, "");
+    }
+
+    out.push(line);
+  }
+
+  if (opts.collapseBlank) {
+    text = out.join("\n").replace(/\n{3,}/g, "\n\n");
+    return text;
+  } else {
+    return out.join("\n");
+  }
+}
+
+async function readClipboard() {
+  try {
+    const t = await navigator.clipboard.readText();
+    return t || "";
+  } catch (e) {
+    alert("讀取剪貼簿失敗：瀏覽器或權限限制，請改用手動貼上唷～");
+    return "";
+  }
+}
+
+function download(filename, text) {
+  const blob = new Blob([text], {type: "text/markdown;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "notes.md";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 0);
+}
+
+document.getElementById("pasteBtn").addEventListener("click", async () => {
+  const t = await readClipboard();
+  if (t) {
+    const el = document.getElementById("input");
+    el.value = t;
+    el.focus();
+  }
+});
+
+document.getElementById("exampleBtn").addEventListener("click", () => {
+  const sample = `  這是   範例   文字
+
+-   項目一  
+-    項目二
+
+\`\`\`js
+// 程式碼區塊不應被合併空格
+const  x   =  1;
+\`\`\`
+“中文引號” 與 ‘單引號’ 將正規化`;
+  document.getElementById("input").value = sample;
+});
+
+document.getElementById("cleanBtn").addEventListener("click", () => {
+  const raw = document.getElementById("input").value || "";
+  const opts = {
+    trimLines: document.getElementById("trimLines").checked,
+    rstrip: document.getElementById("rstrip").checked,
+    collapseSpaces: document.getElementById("collapseSpaces").checked,
+    collapseBlank: document.getElementById("collapseBlank").checked,
+    normalizeQuotes: document.getElementById("normalizeQuotes").checked,
+    fixList: document.getElementById("fixList").checked,
+  };
+  const cleaned = cleanText(raw, opts);
+  document.getElementById("output").value = cleaned;
+});
+
+document.getElementById("copyBtn").addEventListener("click", async () => {
+  const out = document.getElementById("output").value || "";
+  try {
+    await navigator.clipboard.writeText(out);
+    alert("已複製到剪貼簿～");
+  } catch(e) {
+    alert("複製失敗：請手動全選（長按）後複製。");
+  }
+});
+
+document.getElementById("saveBtn").addEventListener("click", () => {
+  const name = document.getElementById("filename").value.trim() || "notes.md";
+  const out = document.getElementById("output").value || "";
+  if (!out) { alert("還沒有輸出內容喔～先按「清洗」。"); return; }
+  download(name, out);
+});
+</script>
+</body>
+</html>
